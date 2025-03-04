@@ -179,7 +179,13 @@ impl AndroidLogger {
 
 static ANDROID_LOGGER: OnceLock<AndroidLogger> = OnceLock::new();
 
-// Maximum length of a tag that does not require allocation.
+/// Maximum length of a tag that does not require allocation.
+///
+/// Tags configured explicitly in [Config] will not cause an extra allocation. When the tag is
+/// derived from the module path, paths longer than this limit will trigger an allocation for each
+/// log statement.
+///
+/// The terminating nullbyte does not count towards this limit.
 const LOGGING_TAG_MAX_LEN: usize = 127;
 const LOGGING_MSG_MAX_LEN: usize = 4000;
 
@@ -212,34 +218,28 @@ impl Log for AndroidLogger {
             return;
         }
 
+        // Temporary storage for null-terminating record.module_path() if it's needed.
         // tag longer than LOGGING_TAG_MAX_LEN causes allocation
         let mut tag_bytes: [MaybeUninit<u8>; LOGGING_TAG_MAX_LEN + 1] = uninit_array();
+        // In case we end up allocating, keep the CString alive.
+        let _owned_tag;
 
         let module_path = record.module_path().unwrap_or_default();
 
-        // If no tag was specified, use module name
-        let custom_tag = &config.tag;
-        let tag = custom_tag
-            .as_ref()
-            .map(|s| s.as_bytes())
-            .unwrap_or_else(|| module_path.as_bytes());
-
-        // In case we end up allocating, keep the CString alive.
-        let _owned_tag;
-        let tag: &CStr = if tag.len() < tag_bytes.len() {
-            // use stack array as C string
-            self.fill_tag_bytes(&mut tag_bytes, tag);
-            // SAFETY: fill_tag_bytes always puts a nullbyte in tag_bytes.
-            unsafe { CStr::from_ptr(mem::transmute(tag_bytes.as_ptr())) }
+        let tag: &CStr = if let Some(ref tag) = config.tag {
+            tag
         } else {
-            // Tag longer than available stack buffer; allocate.
-            // We're using either
-            // - CString::as_bytes on config.tag, or
-            // - str::as_bytes on record.module_path()
-            // Neither of those include the terminating nullbyte.
-            _owned_tag = CString::new(tag)
-                .expect("config.tag or record.module_path() should never contain nullbytes");
-            _owned_tag.as_ref()
+            if module_path.len() < tag_bytes.len() {
+                // use stack array as C string
+                self.fill_tag_bytes(&mut tag_bytes, module_path.as_bytes());
+                // SAFETY: fill_tag_bytes always puts a nullbyte in tag_bytes.
+                unsafe { CStr::from_ptr(mem::transmute(tag_bytes.as_ptr())) }
+            } else {
+                // Tag longer than available stack buffer; allocate.
+                _owned_tag = CString::new(module_path.as_bytes())
+                    .expect("record.module_path() shouldn't contain nullbytes");
+                _owned_tag.as_ref()
+            }
         };
 
         // message must not exceed LOGGING_MSG_MAX_LEN
@@ -248,7 +248,7 @@ impl Log for AndroidLogger {
 
         // If a custom tag is used, add the module path to the message.
         // Use PlatformLogWriter to output chunks if they exceed max size.
-        let _ = match (custom_tag, &config.custom_format) {
+        let _ = match (&config.tag, &config.custom_format) {
             (_, Some(format)) => format(&mut writer, record),
             (Some(_), _) => fmt::write(
                 &mut writer,
