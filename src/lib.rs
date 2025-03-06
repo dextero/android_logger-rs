@@ -231,12 +231,12 @@ pub fn log(record: &Record) {
 /// It is ok to call this at the activity creation, and it will be
 /// repeatedly called on every lifecycle restart (i.e. screen rotation).
 pub fn init_once(config: Config) {
-    let log_level = config.log_level;
     let logger = ANDROID_LOGGER.get_or_init(|| AndroidLogger::new(config));
 
     if let Err(err) = log::set_logger(logger) {
         log::debug!("android_logger: log::set_logger failed: {}", err);
-    } else if let Some(level) = log_level {
-        log::set_max_level(level);
     }
+    // log crate is not aware of any filtering logic done by AndroidLogger.
+    // Make it pass all the logs down.
+    log::set_max_level(log::LevelFilter::Trace);
 }

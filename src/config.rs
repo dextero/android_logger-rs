@@ -63,7 +63,7 @@ fn android_is_loggable_len(
 
 #[cfg(not(all(target_os = "android", feature = "android-api-30")))]
 fn default_is_loggable(_tag: &str, record_level: Level, config_level: Option<LevelFilter>) -> bool {
-    record_level <= config_level.unwrap_or_else(log::max_level)
+    record_level <= config_level.unwrap_or(LevelFilter::Info)
 }
 
 #[cfg(all(target_os = "android", feature = "android-api-30"))]

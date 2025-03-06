@@ -5,6 +5,7 @@ extern crate log;
 fn default_init() {
     android_logger::init_once(Default::default());
 
-    // android_logger has default log level "off"
-    assert_eq!(log::max_level(), log::LevelFilter::Off);
+    // android_logger sets the default log level on the log crate to "trace" to handle the log
+    // filtering itself.
+    assert_eq!(log::max_level(), log::LevelFilter::Trace);
 }
